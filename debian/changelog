@@ -24,6 +24,7 @@ ryu (3.30+dfsg1-1) experimental; urgency=medium
     - scraped most of the sysv-rc init script, enriched the declarative part.
     - trashed the debian/*.service unit file, now generated automatically.
   * Added copytruncate in the ryu logrotate file.
+  * Standards-Version: 3.9.7 (no change).
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 08 Mar 2016 23:26:51 +0100
 
