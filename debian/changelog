@@ -1,0 +1,96 @@
+ryu (3.30+dfsg1-1) experimental; urgency=medium
+
+  * New upstream release.
+  * Uploading to experimental until Mitaka is out.
+  * Moved the package to PKG OpenStack:
+    - Updated VCS fields.
+    - Switched to git tag based workflow instead of pristine-tar (updated
+      gbp.conf, etc.).
+    - Added build-depends on openstack-pkg-tools.
+    - Added export OSLO_PACKAGE_VERSION
+    - Added upstream VCS URL in debian/rules.
+    - Includes pkgos.make in debian/rules.
+    - Now using +dfsg1 suffix from upstream, showing we're removing their
+      debian folder. Updated watch file accordingly.
+  * Added myself as Uploaders:.
+  * Removed useless X-Python-Version: in python-ryu.
+  * Added myself in debian/copyright.
+  * Added explicit --buildsystem=python_distutils for dh.
+  * Switched the ryu.init to ryu.init.in format from openstack-pkg-tools, so
+    that ryu supports sysv-rc, upstart and systemd now:
+    - rm -f debian/*.init debian/*.upstart debian/*.service in d/rules
+    - added --with systemd
+    - build-depends on dh-systemd.
+    - scraped most of the sysv-rc init script, enriched the declarative part.
+    - trashed the debian/*.service unit file, now generated automatically.
+  * Added copytruncate in the ryu logrotate file.
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 08 Mar 2016 23:26:51 +0100
+
+ryu (3.26-1) unstable; urgency=medium
+
+  * Imported Upstream version 3.26
+  * d/patches: removed patch fixing pbr version in setup.py
+
+ -- Dariusz Dwornikowski <dariusz.dwornikowski@cs.put.poznan.pl>  Fri, 02 Oct 2015 14:40:35 +0200
+
+ryu (3.24-1.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Ran wrap-and-sort -t -a.
+  * Fixed wrong location for python-setuptools and python-pbr: they should be
+    in Build-Depends and not Build-Depends-Indep as they are needed for clean.
+  * Fixed wrong version of pbr in setup.py: the restriction is simply wrong.
+  * Removed versions in (build-)depends when already satisfied in Jessie &
+    Trusty.
+  * Added running of test suite: now build-depends-indep on nose, formencode,
+    mock.
+  * Make sure dh_clean doesn't download by setting http{s,}_proxy.
+  * Drops now useless X-Python-Version: >= 2.6 (Jessie has 2.7 only).
+  * Using sphinx-build directly instead of the provided Makefile.
+  * Added (= ${binary:Version}) in ryu-bin python-ryu depends:.
+  * Added extend-diff-ignore = "^[^/]*[.]egg-info/" in d/s/options, do not
+    clean egg-info on clean.
+  * Added overrides of dh commands we don't need to run.
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 25 Sep 2015 10:10:59 +0200
+
+ryu (3.24-1) unstable; urgency=medium
+
+  * Imported Upstream version 3.24 (Closes: #794101)
+
+ -- Dariusz Dwornikowski <dariusz.dwornikowski@cs.put.poznan.pl>  Sun, 09 Aug 2015 17:45:44 +0200
+
+ryu (3.23-2) unstable; urgency=medium
+
+  * d/rules: doc build date taken from changelog
+
+ -- Dariusz Dwornikowski <dariusz.dwornikowski@cs.put.poznan.pl>  Thu, 30 Jul 2015 20:55:33 +0200
+
+ryu (3.23-1) unstable; urgency=medium
+
+  * Imported Upstream version 3.23
+
+ -- Dariusz Dwornikowski <dariusz.dwornikowski@cs.put.poznan.pl>  Thu, 23 Jul 2015 11:27:02 +0200
+
+ryu (3.19-1) unstable; urgency=medium
+
+  * Imported Upstream version 3.19
+  * d/control: dh-python added to build deps
+
+ -- Dariusz Dwornikowski <dariusz.dwornikowski@cs.put.poznan.pl>  Sun, 22 Mar 2015 19:37:52 +0100
+
+ryu (3.14-1) unstable; urgency=medium
+
+  * Imported Upstream version 3.14
+  * Updated path in d/copyright
+  * Bump standards to 3.9.6 
+    - no changes needed
+
+ -- Dariusz Dwornikowski <dariusz.dwornikowski@cs.put.poznan.pl>  Wed, 22 Oct 2014 09:37:48 +0200
+
+ryu (3.12-1) unstable; urgency=medium
+
+  * Initial release (Closes: #758509)
+
+ -- Dariusz Dwornikowski <dariusz.dwornikowski@cs.put.poznan.pl>  Mon, 18 Aug 2014 16:58:52 +0200

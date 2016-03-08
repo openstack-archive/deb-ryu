@@ -1,0 +1,58 @@
+#!/usr/bin/make -f
+
+PYTHONS:=$(shell pyversions -vr)
+PYTHON3S:=$(shell py3versions -vr)
+
+UPSTREAM_GIT = git://github.com/osrg/ryu.git
+include /usr/share/openstack-pkg-tools/pkgos.make
+
+export OSLO_PACKAGE_VERSION=$(VERSION)
+
+LAST_CHANGE=$(shell dpkg-parsechangelog -S Date)
+BUILD_DATE=$(shell LC_ALL=C date -u "+%B %d, %Y" -d "$(LAST_CHANGE)")
+
+%:
+	dh $@ --buildsystem=python_distutils --with python2,sphinxdoc,systemd
+
+override_dh_auto_test:
+ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
+	PYTHONPATH=. python ryu/tests/run_tests.py
+endif
+
+override_dh_installman:
+ifeq (,$(findstring nodocs, $(DEB_BUILD_OPTIONS)))
+	cd doc; \
+	make man SPHINXOPTS="-D today=\"$(BUILD_DATE)\"" ;\
+	cp build/man/* ../debian/
+	dh_installman
+endif
+
+override_dh_sphinxdoc:
+ifeq (,$(findstring nodocs, $(DEB_BUILD_OPTIONS)))
+	PYTHONPATH=. sphinx-build -b html doc/source debian/python-ryu-doc/usr/share/doc/python-ryu-doc/html
+	dh_sphinxdoc
+endif
+
+override_dh_installinit:
+	dh_installinit --no-start --name=ryu
+
+override_dh_installlogrotate:
+	dh_installlogrotate --name=ryu
+
+override_dh_clean:
+	http_proxy=127.0.0.1:9 https_proxy=127.0.0.1:9 dh_clean
+	rm -f debian/*.init debian/*.upstart debian/*.service
+
+override_dh_auto_clean:
+	rm -rf debian/ryu-manager.8 debian/ryu.8
+	#http_proxy=127.0.0.1:9 https_proxy=127.0.0.1:9 dh_auto_clean
+
+# Commands not to run
+override_dh_installcatalogs:
+override_dh_installemacsen override_dh_installifupdown:
+override_dh_installinfo override_dh_installmenu override_dh_installmime:
+override_dh_installmodules override_dh_installlogcheck:
+override_dh_installpam override_dh_installppp override_dh_installudev override_dh_installwm:
+override_dh_installxfonts override_dh_gconf override_dh_icons override_dh_perl override_dh_usrlocal:
+override_dh_installcron override_dh_installdebconf:
+override_dh_installgsettings:

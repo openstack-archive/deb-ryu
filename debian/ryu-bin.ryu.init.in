@@ -1,0 +1,23 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          ryu
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: ryu init file
+# Description:       An init file for ryu SDN controller
+### END INIT INFO
+
+# Author: Dariusz Dwornikowski <dariusz.dwornikowski@cs.put.poznan.pl>
+# Author: Thomas Goirand <zigo@debian.org>
+DESC="Ryu controller"
+PROJECT_NAME=ryu
+NAME=ryu
+DAEMON=/usr/bin/$NAME
+SYSTEM_USER=root
+SYSTEM_GROUP=root
+NO_OPENSTACK_CONFIG_FILE_DAEMON_ARG=yes
+NO_OPENSTACK_LOGFILE_DAEMON_ARG=yes
+DAEMON_ARGS="run --config-file /etc/ryu/ryu.conf"
+SCRIPTNAME=/etc/init.d/$NAME
