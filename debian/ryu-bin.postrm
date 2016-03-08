@@ -1,0 +1,12 @@
+#!/bin/sh
+
+set -e
+
+if [ "${1}" = "purge" ] ; then
+	rm -rf /var/lib/ryu
+	rm -rf /var/log/ryu
+fi
+
+#DEBHELPER#
+
+exit 0
