@@ -25,7 +25,7 @@ Build-Depends-Indep: python-eventlet,
                      python-routes,
                      python-six,
                      python-webob,
-Standards-Version: 3.9.7
+Standards-Version: 3.9.8
 Vcs-Browser: https://anonscm.debian.org/gitweb/?p=openstack/ryu.git
 Vcs-Git: https://anonscm.debian.org/git/openstack/ryu.git
 Homepage: http://osrg.github.io/ryu/
