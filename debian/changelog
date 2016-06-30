@@ -1,10 +1,14 @@
-ryu (3.30+dfsg1-3) UNRELEASED; urgency=medium
+ryu (3.30+dfsg1-3) unstable; urgency=medium
 
+  [ Ondřej Nový ]
   * Standards-Version is 3.9.8 now (no change)
   * d/rules: Changed UPSTREAM_GIT protocol to https
   * d/copyright: Changed source URL to https protocol
 
- -- Ondřej Nový <novy@ondrej.org>  Sat, 09 Apr 2016 19:32:02 +0200
+  [ Thomas Goirand ]
+  * Add build-depends-indep on python-sphinx-rtd-theme. (Closes: #829024)
+
+ -- Thomas Goirand <zigo@debian.org>  Thu, 30 Jun 2016 09:58:13 +0200
 
 ryu (3.30+dfsg1-2) unstable; urgency=medium
 
