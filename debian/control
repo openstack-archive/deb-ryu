@@ -24,6 +24,7 @@ Build-Depends-Indep: python-eventlet,
                      python-paramiko,
                      python-routes,
                      python-six,
+                     python-sphinx-rtd-theme,
                      python-webob,
 Standards-Version: 3.9.8
 Vcs-Browser: https://anonscm.debian.org/gitweb/?p=openstack/ryu.git
