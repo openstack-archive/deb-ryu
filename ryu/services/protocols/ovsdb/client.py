@@ -14,25 +14,12 @@
 # limitations under the License.
 
 import collections
-import logging
+import errno
+import six
 import uuid
 
-# NOTE(jkoelker) Patch Vlog so that is uses standard logging
-from ovs import vlog
-
-
-class Vlog(vlog.Vlog):
-    def __init__(self, name):
-        self.log = logging.getLogger('ovs.%s' % name)
-
-    def __log(self, level, message, **kwargs):
-        level = vlog.LEVELS.get(level, logging.DEBUG)
-        self.log.log(level, message, **kwargs)
-
-vlog.Vlog = Vlog
-
-
 from ovs import jsonrpc
+from ovs import poller
 from ovs import reconnect
 from ovs import stream
 from ovs import timeval
@@ -63,8 +50,46 @@ def dictify(row):
     if row is None:
         return
 
-    return dict([(k, v.to_python(_uuid_to_row))
-                 for k, v in row._data.items()])
+    result = {}
+
+    for key, value in row._data.items():
+        result[key] = value.to_python(_uuid_to_row)
+        hub.sleep(0)
+
+    return result
+
+
+def transact_block(request, connection):
+    """Emulate jsonrpc.Connection.transact_block without blocking eventlet.
+    """
+    error = connection.send(request)
+    reply = None
+
+    if error:
+        return error, reply
+
+    ovs_poller = poller.Poller()
+    while not error:
+        ovs_poller.immediate_wake()
+        error, reply = connection.recv()
+
+        if error != errno.EAGAIN:
+            break
+
+        if (reply and
+            reply.id == request.id and
+            reply.type in (jsonrpc.Message.T_REPLY,
+                           jsonrpc.Message.T_ERROR)):
+            break
+
+        connection.run()
+        connection.wait(ovs_poller)
+        connection.recv_wait(ovs_poller)
+        ovs_poller.block()
+
+        hub.sleep(0)
+
+    return error, reply
 
 
 def discover_schemas(connection):
@@ -72,7 +97,7 @@ def discover_schemas(connection):
     #                is supported.
     # TODO(jkoelker) support arbitrary schemas
     req = jsonrpc.Message.create_request('list_dbs', [])
-    error, reply = connection.transact_block(req)
+    error, reply = transact_block(req, connection)
 
     if error or reply.error:
         return
@@ -83,7 +108,7 @@ def discover_schemas(connection):
             continue
 
         req = jsonrpc.Message.create_request('get_schema', [db])
-        error, reply = connection.transact_block(req)
+        error, reply = transact_block(req, connection)
 
         if error or reply.error:
             # TODO(jkoelker) Error handling
@@ -108,6 +133,68 @@ def discover_system_id(idl):
     return system_id
 
 
+def _filter_schemas(schemas, schema_tables, exclude_table_columns):
+    """Wrapper method for _filter_schema to filter multiple schemas."""
+    return [_filter_schema(s, schema_tables, exclude_table_columns)
+            for s in schemas]
+
+
+def _filter_schema(schema, schema_tables, exclude_table_columns):
+    """Filters a schema to only include the specified tables in the
+       schema_tables parameter.  This will also filter out any colums for
+       included tables that reference tables that are not included
+       in the schema_tables parameter
+
+    :param schema: Schema dict to be filtered
+    :param schema_tables: List of table names to filter on.
+                          EX: ['Bridge', 'Controller', 'Interface']
+                          NOTE: This list is case sensitive.
+    :return: Schema dict:
+                filtered if the schema_table parameter contains table names,
+                else the original schema dict
+    """
+
+    tables = {}
+    for tbl_name, tbl_data in schema['tables'].iteritems():
+        if not schema_tables or tbl_name in schema_tables:
+            columns = {}
+
+            exclude_columns = exclude_table_columns.get(tbl_name, [])
+            for col_name, col_data in tbl_data['columns'].iteritems():
+                if col_name in exclude_columns:
+                    continue
+
+                # NOTE(Alan Quillin) Needs to check and remove
+                # and columns that have references to tables that
+                # are not to be configured
+                type_ = col_data.get('type')
+                if type_:
+                    if type_ and isinstance(type_, dict):
+                        key = type_.get('key')
+                        if key and isinstance(key, dict):
+                            ref_tbl = key.get('refTable')
+                            if ref_tbl and isinstance(ref_tbl,
+                                                      six.string_types):
+                                if ref_tbl not in schema_tables:
+                                    continue
+                        value = type_.get('value')
+                        if value and isinstance(value, dict):
+                            ref_tbl = value.get('refTable')
+                            if ref_tbl and isinstance(ref_tbl,
+                                                      six.string_types):
+                                if ref_tbl not in schema_tables:
+                                    continue
+
+                columns[col_name] = col_data
+
+            tbl_data['columns'] = columns
+            tables[tbl_name] = tbl_data
+
+    schema['tables'] = tables
+
+    return schema
+
+
 # NOTE(jkoelker) Wrap ovs's Idl to accept an existing session, and
 #                trigger callbacks on changes
 class Idl(idl.Idl):
@@ -122,6 +209,7 @@ class Idl(idl.Idl):
         self._events = []
 
         self.tables = schema.tables
+        self.readonly = schema.readonly
         self._db = schema
         self._session = session
         self._monitor_request_id = None
@@ -192,7 +280,9 @@ class RemoteOvsdb(app_manager.RyuApp):
                event.EventPortUpdated]
 
     @classmethod
-    def factory(cls, sock, address, *args, **kwargs):
+    def factory(cls, sock, address, probe_interval=None, min_backoff=None,
+                max_backoff=None, schema_tables=None,
+                schema_exclude_columns={}, *args, **kwargs):
         ovs_stream = stream.Stream(sock, None, None)
         connection = jsonrpc.Connection(ovs_stream)
         schemas = discover_schemas(connection)
@@ -200,11 +290,28 @@ class RemoteOvsdb(app_manager.RyuApp):
         if not schemas:
             return
 
+        if schema_tables or schema_exclude_columns:
+            schemas = _filter_schemas(schemas, schema_tables,
+                                      schema_exclude_columns)
+
         fsm = reconnect.Reconnect(now())
         fsm.set_name('%s:%s' % address)
         fsm.enable(now())
         fsm.set_passive(True, now())
         fsm.set_max_tries(-1)
+
+        if probe_interval is not None:
+            fsm.set_probe_interval(probe_interval)
+
+        if min_backoff is None:
+            min_backoff = fsm.get_min_backoff()
+
+        if max_backoff is None:
+            max_backoff = fsm.get_max_backoff()
+
+        if min_backoff and max_backoff:
+            fsm.set_backoff(min_backoff, max_backoff)
+
         fsm.connected(now())
 
         session = jsonrpc.Session(fsm, connection)
@@ -261,9 +368,9 @@ class RemoteOvsdb(app_manager.RyuApp):
                 hub.sleep(0.1)
                 continue
 
-            for event in events:
-                ev = event[0]
-                args = event[1]
+            for e in events:
+                ev = e[0]
+                args = e[1]
                 self._submit_event(ev(self.system_id, *args))
 
             hub.sleep(0)
@@ -334,8 +441,15 @@ class RemoteOvsdb(app_manager.RyuApp):
     def modify_request_handler(self, ev):
         self._txn_q.append(ev)
 
-    def read_request_handler(self, ev):
+    def read_request_handler(self, ev, bulk=False):
         result = ev.func(self._idl.tables)
+
+        # NOTE(jkoelker) If this was a bulk request, the parent OVSDB app is
+        #                responsible for the reply
+
+        if bulk:
+            return (self.system_id, result)
+
         rep = event.EventReadReply(self.system_id, result)
         self.reply_to_request(ev, rep)
 

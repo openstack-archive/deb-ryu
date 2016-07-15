@@ -18,7 +18,6 @@ import socket
 import logging
 
 from ryu.ofproto import ofproto_v1_0
-from ryu.lib import hub
 from ryu.lib import ofctl_utils
 from ryu.lib.mac import haddr_to_bin, haddr_to_str
 
@@ -258,8 +257,8 @@ def match_to_str(m):
 
 def nw_src_to_str(wildcards, addr):
     ip = socket.inet_ntoa(struct.pack('!I', addr))
-    mask = 32 - ((wildcards & ofproto_v1_0.OFPFW_NW_SRC_MASK)
-                 >> ofproto_v1_0.OFPFW_NW_SRC_SHIFT)
+    mask = 32 - ((wildcards & ofproto_v1_0.OFPFW_NW_SRC_MASK) >>
+                 ofproto_v1_0.OFPFW_NW_SRC_SHIFT)
     if mask == 32:
         mask = 0
     if mask:
@@ -269,8 +268,8 @@ def nw_src_to_str(wildcards, addr):
 
 def nw_dst_to_str(wildcards, addr):
     ip = socket.inet_ntoa(struct.pack('!I', addr))
-    mask = 32 - ((wildcards & ofproto_v1_0.OFPFW_NW_DST_MASK)
-                 >> ofproto_v1_0.OFPFW_NW_DST_SHIFT)
+    mask = 32 - ((wildcards & ofproto_v1_0.OFPFW_NW_DST_MASK) >>
+                 ofproto_v1_0.OFPFW_NW_DST_SHIFT)
     if mask == 32:
         mask = 0
     if mask:
@@ -278,30 +277,11 @@ def nw_dst_to_str(wildcards, addr):
     return ip
 
 
-def send_stats_request(dp, stats, waiters, msgs):
-    dp.set_xid(stats)
-    waiters_per_dp = waiters.setdefault(dp.id, {})
-    lock = hub.Event()
-    previous_msg_len = len(msgs)
-    waiters_per_dp[stats.xid] = (lock, msgs)
-    dp.send_msg(stats)
-
-    lock.wait(timeout=DEFAULT_TIMEOUT)
-    current_msg_len = len(msgs)
-
-    while current_msg_len > previous_msg_len:
-        previous_msg_len = current_msg_len
-        lock.wait(timeout=DEFAULT_TIMEOUT)
-        current_msg_len = len(msgs)
-
-    if not lock.is_set():
-        del waiters_per_dp[stats.xid]
-
-
 def get_desc_stats(dp, waiters):
     stats = dp.ofproto_parser.OFPDescStatsRequest(dp, 0)
     msgs = []
-    send_stats_request(dp, stats, waiters, msgs)
+    ofctl_utils.send_stats_request(dp, stats, waiters, msgs, LOG)
+    s = {}
 
     for msg in msgs:
         stats = msg.body
@@ -314,11 +294,21 @@ def get_desc_stats(dp, waiters):
     return desc
 
 
-def get_queue_stats(dp, waiters):
-    stats = dp.ofproto_parser.OFPQueueStatsRequest(dp, 0, dp.ofproto.OFPP_ALL,
-                                                   dp.ofproto.OFPQ_ALL)
+def get_queue_stats(dp, waiters, port=None, queue_id=None):
+    if port is None:
+        port = dp.ofproto.OFPP_ALL
+    else:
+        port = int(str(port), 0)
+
+    if queue_id is None:
+        queue_id = dp.ofproto.OFPQ_ALL
+    else:
+        queue_id = int(str(queue_id), 0)
+
+    stats = dp.ofproto_parser.OFPQueueStatsRequest(dp, 0, port,
+                                                   queue_id)
     msgs = []
-    send_stats_request(dp, stats, waiters, msgs)
+    ofctl_utils.send_stats_request(dp, stats, waiters, msgs, LOG)
 
     s = []
     for msg in msgs:
@@ -345,7 +335,7 @@ def get_flow_stats(dp, waiters, flow=None):
         dp, 0, match, table_id, out_port)
 
     msgs = []
-    send_stats_request(dp, stats, waiters, msgs)
+    ofctl_utils.send_stats_request(dp, stats, waiters, msgs, LOG)
 
     flows = []
     for msg in msgs:
@@ -381,7 +371,7 @@ def get_aggregate_flow_stats(dp, waiters, flow=None):
         dp, 0, match, table_id, out_port)
 
     msgs = []
-    send_stats_request(dp, stats, waiters, msgs)
+    ofctl_utils.send_stats_request(dp, stats, waiters, msgs, LOG)
 
     flows = []
     for msg in msgs:
@@ -390,7 +380,7 @@ def get_aggregate_flow_stats(dp, waiters, flow=None):
             s = {'packet_count': st.packet_count,
                  'byte_count': st.byte_count,
                  'flow_count': st.flow_count}
-        flows.append(s)
+            flows.append(s)
     flows = {str(dp.id): flows}
 
     return flows
@@ -400,7 +390,7 @@ def get_table_stats(dp, waiters):
     stats = dp.ofproto_parser.OFPTableStatsRequest(dp, 0)
     ofp = dp.ofproto
     msgs = []
-    send_stats_request(dp, stats, waiters, msgs)
+    ofctl_utils.send_stats_request(dp, stats, waiters, msgs, LOG)
 
     match_convert = {ofp.OFPFW_IN_PORT: 'IN_PORT',
                      ofp.OFPFW_DL_VLAN: 'DL_VLAN',
@@ -447,11 +437,16 @@ def get_table_stats(dp, waiters):
     return desc
 
 
-def get_port_stats(dp, waiters):
+def get_port_stats(dp, waiters, port=None):
+    if port is None:
+        port = dp.ofproto.OFPP_NONE
+    else:
+        port = int(str(port), 0)
+
     stats = dp.ofproto_parser.OFPPortStatsRequest(
-        dp, 0, dp.ofproto.OFPP_NONE)
+        dp, 0, port)
     msgs = []
-    send_stats_request(dp, stats, waiters, msgs)
+    ofctl_utils.send_stats_request(dp, stats, waiters, msgs, LOG)
 
     ports = []
     for msg in msgs:
@@ -478,7 +473,7 @@ def get_port_desc(dp, waiters):
 
     stats = dp.ofproto_parser.OFPFeaturesRequest(dp)
     msgs = []
-    send_stats_request(dp, stats, waiters, msgs)
+    ofctl_utils.send_stats_request(dp, stats, waiters, msgs, LOG)
 
     descs = []
 
@@ -521,7 +516,7 @@ def mod_flow_entry(dp, flow, cmd):
         flags=flags,
         actions=actions)
 
-    dp.send_msg(flow_mod)
+    ofctl_utils.send_msg(dp, flow_mod, LOG)
 
 
 def delete_flow_entry(dp):
@@ -532,7 +527,7 @@ def delete_flow_entry(dp):
         datapath=dp, match=match, cookie=0,
         command=dp.ofproto.OFPFC_DELETE)
 
-    dp.send_msg(flow_mod)
+    ofctl_utils.send_msg(dp, flow_mod, LOG)
 
 
 def mod_port_behavior(dp, port_config):
@@ -545,4 +540,4 @@ def mod_port_behavior(dp, port_config):
     port_mod = dp.ofproto_parser.OFPPortMod(
         dp, port_no, hw_addr, config, mask, advertise)
 
-    dp.send_msg(port_mod)
+    ofctl_utils.send_msg(dp, port_mod, LOG)

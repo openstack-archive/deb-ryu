@@ -30,7 +30,7 @@ from ryu.lib.hub import StreamServer
 import traceback
 import random
 import ssl
-from socket import IPPROTO_TCP, TCP_NODELAY, timeout as SocketTimeout, error as SocketError
+from socket import IPPROTO_TCP, TCP_NODELAY, SHUT_RDWR, timeout as SocketTimeout
 import warnings
 
 import ryu.base.app_manager
@@ -41,8 +41,8 @@ from ryu.ofproto import ofproto_protocol
 from ryu.ofproto import ofproto_v1_0
 from ryu.ofproto import nx_match
 
-from ryu.controller import handler
 from ryu.controller import ofp_event
+from ryu.controller.handler import HANDSHAKE_DISPATCHER, DEAD_DISPATCHER
 
 from ryu.lib.dpid import dpid_to_str
 
@@ -51,31 +51,56 @@ LOG = logging.getLogger('ryu.controller.controller')
 CONF = cfg.CONF
 CONF.register_cli_opts([
     cfg.StrOpt('ofp-listen-host', default='', help='openflow listen host'),
-    cfg.IntOpt('ofp-tcp-listen-port', default=ofproto_common.OFP_TCP_PORT,
-               help='openflow tcp listen port'),
-    cfg.IntOpt('ofp-ssl-listen-port', default=ofproto_common.OFP_SSL_PORT,
-               help='openflow ssl listen port'),
+    cfg.IntOpt('ofp-tcp-listen-port', default=None,
+               help='openflow tcp listen port '
+                    '(default: %d)' % ofproto_common.OFP_TCP_PORT),
+    cfg.IntOpt('ofp-ssl-listen-port', default=None,
+               help='openflow ssl listen port '
+                    '(default: %d)' % ofproto_common.OFP_SSL_PORT),
     cfg.StrOpt('ctl-privkey', default=None, help='controller private key'),
     cfg.StrOpt('ctl-cert', default=None, help='controller certificate'),
-    cfg.StrOpt('ca-certs', default=None, help='CA certificates'),
-    cfg.FloatOpt('socket-timeout', default=5.0, help='Time, in seconds, to await completion of socket operations.')
+    cfg.StrOpt('ca-certs', default=None, help='CA certificates')
+])
+CONF.register_opts([
+    cfg.FloatOpt('socket-timeout',
+                 default=5.0,
+                 help='Time, in seconds, to await completion of socket operations.'),
+    cfg.FloatOpt('echo-request-interval',
+                 default=15.0,
+                 help='Time, in seconds, between sending echo requests to a datapath.'),
+    cfg.IntOpt('maximum-unreplied-echo-requests',
+               default=0,
+               min=0,
+               help='Maximum number of unreplied echo requests before datapath is disconnected.')
 ])
 
 
 class OpenFlowController(object):
     def __init__(self):
         super(OpenFlowController, self).__init__()
+        if not CONF.ofp_tcp_listen_port and not CONF.ofp_ssl_listen_port:
+            self.ofp_tcp_listen_port = ofproto_common.OFP_TCP_PORT
+            self.ofp_ssl_listen_port = ofproto_common.OFP_SSL_PORT
+            # For the backward compatibility, we spawn a server loop
+            # listening on the old OpenFlow listen port 6633.
+            hub.spawn(self.server_loop,
+                      ofproto_common.OFP_TCP_PORT_OLD,
+                      ofproto_common.OFP_SSL_PORT_OLD)
+        else:
+            self.ofp_tcp_listen_port = CONF.ofp_tcp_listen_port
+            self.ofp_ssl_listen_port = CONF.ofp_ssl_listen_port
 
     # entry point
     def __call__(self):
         # LOG.debug('call')
-        self.server_loop()
+        self.server_loop(self.ofp_tcp_listen_port,
+                         self.ofp_ssl_listen_port)
 
-    def server_loop(self):
+    def server_loop(self, ofp_tcp_listen_port, ofp_ssl_listen_port):
         if CONF.ctl_privkey is not None and CONF.ctl_cert is not None:
             if CONF.ca_certs is not None:
                 server = StreamServer((CONF.ofp_listen_host,
-                                       CONF.ofp_ssl_listen_port),
+                                       ofp_ssl_listen_port),
                                       datapath_connection_factory,
                                       keyfile=CONF.ctl_privkey,
                                       certfile=CONF.ctl_cert,
@@ -84,14 +109,14 @@ class OpenFlowController(object):
                                       ssl_version=ssl.PROTOCOL_TLSv1)
             else:
                 server = StreamServer((CONF.ofp_listen_host,
-                                       CONF.ofp_ssl_listen_port),
+                                       ofp_ssl_listen_port),
                                       datapath_connection_factory,
                                       keyfile=CONF.ctl_privkey,
                                       certfile=CONF.ctl_cert,
                                       ssl_version=ssl.PROTOCOL_TLSv1)
         else:
             server = StreamServer((CONF.ofp_listen_host,
-                                   CONF.ofp_tcp_listen_port),
+                                   ofp_tcp_listen_port),
                                   datapath_connection_factory)
 
         # LOG.debug('loop')
@@ -103,12 +128,67 @@ def _deactivate(method):
         try:
             method(self)
         finally:
-            self.send_active = False
-            self.set_state(handler.DEAD_DISPATCHER)
+            try:
+                self.socket.shutdown(SHUT_RDWR)
+            except (EOFError, IOError):
+                pass
+
+            if not self.is_active:
+                self.socket.close()
     return deactivate
 
 
 class Datapath(ofproto_protocol.ProtocolDesc):
+    """
+    A class to describe an OpenFlow switch connected to this controller.
+
+    An instance has the following attributes.
+
+    .. tabularcolumns:: |l|L|
+
+    ==================================== ======================================
+    Attribute                            Description
+    ==================================== ======================================
+    id                                   64-bit OpenFlow Datapath ID.
+                                         Only available for
+                                         ryu.controller.handler.MAIN_DISPATCHER
+                                         phase.
+    ofproto                              A module which exports OpenFlow
+                                         definitions, mainly constants appeared
+                                         in the specification, for the
+                                         negotiated OpenFlow version.  For
+                                         example, ryu.ofproto.ofproto_v1_0 for
+                                         OpenFlow 1.0.
+    ofproto_parser                       A module which exports OpenFlow wire
+                                         message encoder and decoder for the
+                                         negotiated OpenFlow version.
+                                         For example,
+                                         ryu.ofproto.ofproto_v1_0_parser
+                                         for OpenFlow 1.0.
+    ofproto_parser.OFPxxxx(datapath,...) A callable to prepare an OpenFlow
+                                         message for the given switch.  It can
+                                         be sent with Datapath.send_msg later.
+                                         xxxx is a name of the message.  For
+                                         example OFPFlowMod for flow-mod
+                                         message.  Arguemnts depend on the
+                                         message.
+    set_xid(self, msg)                   Generate an OpenFlow XID and put it
+                                         in msg.xid.
+    send_msg(self, msg)                  Queue an OpenFlow message to send to
+                                         the corresponding switch.  If msg.xid
+                                         is None, set_xid is automatically
+                                         called on the message before queueing.
+    send_packet_out                      deprecated
+    send_flow_mod                        deprecated
+    send_flow_del                        deprecated
+    send_delete_all_flows                deprecated
+    send_barrier                         Queue an OpenFlow barrier message to
+                                         send to the switch.
+    send_nxt_set_flow_format             deprecated
+    is_reserved_port                     deprecated
+    ==================================== ======================================
+    """
+
     def __init__(self, socket, address):
         super(Datapath, self).__init__()
 
@@ -116,43 +196,28 @@ class Datapath(ofproto_protocol.ProtocolDesc):
         self.socket.setsockopt(IPPROTO_TCP, TCP_NODELAY, 1)
         self.socket.settimeout(CONF.socket_timeout)
         self.address = address
-
-        self.send_active = True
-        self.close_requested = False
+        self.is_active = True
 
         # The limit is arbitrary. We need to limit queue size to
-        # prevent it from eating memory up
+        # prevent it from eating memory up.
         self.send_q = hub.Queue(16)
+        self._send_q_sem = hub.BoundedSemaphore(self.send_q.maxsize)
+
+        self.echo_request_interval = CONF.echo_request_interval
+        self.max_unreplied_echo_requests = CONF.maximum_unreplied_echo_requests
+        self.unreplied_echo_requests = []
 
         self.xid = random.randint(0, self.ofproto.MAX_XID)
         self.id = None  # datapath_id is unknown yet
         self._ports = None
         self.flow_format = ofproto_v1_0.NXFF_OPENFLOW10
         self.ofp_brick = ryu.base.app_manager.lookup_service_brick('ofp_event')
-        self.set_state(handler.HANDSHAKE_DISPATCHER)
-
-    def _get_ports(self):
-        if (self.ofproto_parser is not None and
-                self.ofproto_parser.ofproto.OFP_VERSION >= 0x04):
-            message = (
-                'Datapath#ports is kept for compatibility with the previous '
-                'openflow versions (< 1.3). '
-                'This not be updated by EventOFPPortStatus message. '
-                'If you want to be updated, you can use '
-                '\'ryu.controller.dpset\' or \'ryu.topology.switches\'.'
-            )
-            warnings.warn(message, stacklevel=2)
-        return self._ports
-
-    def _set_ports(self, ports):
-        self._ports = ports
-
-    # To show warning when Datapath#ports is read
-    ports = property(_get_ports, _set_ports)
+        self.set_state(HANDSHAKE_DISPATCHER)
 
     @_deactivate
     def close(self):
-        self.close_requested = True
+        if self.state != DEAD_DISPATCHER:
+            self.set_state(DEAD_DISPATCHER)
 
     def set_state(self, state):
         self.state = state
@@ -167,19 +232,19 @@ class Datapath(ofproto_protocol.ProtocolDesc):
         required_len = ofproto_common.OFP_HEADER_SIZE
 
         count = 0
-        while True:
-            ret = ""
-
+        while self.state != DEAD_DISPATCHER:
             try:
                 ret = self.socket.recv(required_len)
             except SocketTimeout:
-                if not self.close_requested:
-                    continue
-            except SocketError:
-                self.close_requested = True
+                continue
+            except ssl.SSLError:
+                # eventlet throws SSLError (which is a subclass of IOError)
+                # on SSL socket read timeout; re-try the loop in this case.
+                continue
+            except (EOFError, IOError):
+                break
 
-            if (len(ret) == 0) or (self.close_requested):
-                self.socket.close()
+            if len(ret) == 0:
                 break
 
             buf += ret
@@ -215,30 +280,45 @@ class Datapath(ofproto_protocol.ProtocolDesc):
                     count = 0
                     hub.sleep(0)
 
-    @_deactivate
     def _send_loop(self):
         try:
-            while self.send_active:
+            while self.state != DEAD_DISPATCHER:
                 buf = self.send_q.get()
+                self._send_q_sem.release()
                 self.socket.sendall(buf)
+        except SocketTimeout:
+            LOG.debug("Socket timed out while sending data to switch at address %s",
+                      self.address)
         except IOError as ioe:
-            LOG.debug("Socket error while sending data to switch at address %s: [%d] %s",
-                      self.address, ioe.errno, ioe.strerror)
+            # Convert ioe.errno to a string, just in case it was somehow set to None.
+            errno = "%s" % ioe.errno
+            LOG.debug("Socket error while sending data to switch at address %s: [%s] %s",
+                      self.address, errno, ioe.strerror)
         finally:
             q = self.send_q
-            # first, clear self.send_q to prevent new references.
+            # First, clear self.send_q to prevent new references.
             self.send_q = None
-            # there might be threads currently blocking in send_q.put().
-            # unblock them by draining the queue.
+            # Now, drain the send_q, releasing the associated semaphore for each entry.
+            # This should release all threads waiting to acquire the semaphore.
             try:
                 while q.get(block=False):
-                    pass
+                    self._send_q_sem.release()
             except hub.QueueEmpty:
                 pass
+            # Finally, ensure the _recv_loop terminates.
+            self.close()
 
     def send(self, buf):
+        msg_enqueued = False
+        self._send_q_sem.acquire()
         if self.send_q:
             self.send_q.put(buf)
+            msg_enqueued = True
+        else:
+            self._send_q_sem.release()
+        if not msg_enqueued:
+            LOG.debug('Datapath in process of terminating; send() to %s discarded.',
+                      self.address)
 
     def set_xid(self, msg):
         self.xid += 1
@@ -254,6 +334,23 @@ class Datapath(ofproto_protocol.ProtocolDesc):
         # LOG.debug('send_msg %s', msg)
         self.send(msg.buf)
 
+    def _echo_request_loop(self):
+        if not self.max_unreplied_echo_requests:
+            return
+        while (self.send_q and
+               (len(self.unreplied_echo_requests) <= self.max_unreplied_echo_requests)):
+            echo_req = self.ofproto_parser.OFPEchoRequest(self)
+            self.unreplied_echo_requests.append(self.set_xid(echo_req))
+            self.send_msg(echo_req)
+            hub.sleep(self.echo_request_interval)
+        self.close()
+
+    def acknowledge_echo_reply(self, xid):
+        try:
+            self.unreplied_echo_requests.remove(xid)
+        except:
+            pass
+
     def serve(self):
         send_thr = hub.spawn(self._send_loop)
 
@@ -261,11 +358,15 @@ class Datapath(ofproto_protocol.ProtocolDesc):
         hello = self.ofproto_parser.OFPHello(self)
         self.send_msg(hello)
 
+        echo_thr = hub.spawn(self._echo_request_loop)
+
         try:
             self._recv_loop()
         finally:
             hub.kill(send_thr)
-            hub.joinall([send_thr])
+            hub.kill(echo_thr)
+            hub.joinall([send_thr, echo_thr])
+            self.is_active = False
 
     #
     # Utility methods for convenience

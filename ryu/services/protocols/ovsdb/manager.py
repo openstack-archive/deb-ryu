@@ -26,10 +26,24 @@ from ryu.controller import handler
 
 opts = (cfg.StrOpt('address', default='0.0.0.0', help='OVSDB address'),
         cfg.IntOpt('port', default=6640, help='OVSDB port'),
+        cfg.IntOpt('probe-interval', help='OVSDB reconnect probe interval'),
+        cfg.IntOpt('min-backoff',
+                   help=('OVSDB reconnect minimum milliseconds between '
+                         'connection attemps')),
+        cfg.IntOpt('max-backoff',
+                   help=('OVSDB reconnect maximum milliseconds between '
+                         'connection attemps')),
         cfg.StrOpt('mngr-privkey', default=None, help='manager private key'),
         cfg.StrOpt('mngr-cert', default=None, help='manager certificate'),
         cfg.ListOpt('whitelist', default=[],
-                    help='Whitelist of address to allow to connect'))
+                    help='Whitelist of address to allow to connect'),
+        cfg.ListOpt('schema-tables', default=[],
+                    help='Tables in the OVSDB schema to configure'),
+        cfg.ListOpt('schema-exclude-columns', default=[],
+                    help='Table columns in the OVSDB schema to filter out.  '
+                         'Values should be in the format: <table>.<column>.'
+                         'Ex: Bridge.netflow,Interface.statistics')
+        )
 
 cfg.CONF.register_opts(opts, 'ovsdb')
 
@@ -43,6 +57,9 @@ class OVSDB(app_manager.RyuApp):
         super(OVSDB, self).__init__(*args, **kwargs)
         self._address = self.CONF.ovsdb.address
         self._port = self.CONF.ovsdb.port
+        self._probe_interval = self.CONF.ovsdb.probe_interval
+        self._min_backoff = self.CONF.ovsdb.min_backoff
+        self._max_backoff = self.CONF.ovsdb.max_backoff
         self._clients = {}
 
     def _accept(self, server):
@@ -78,6 +95,26 @@ class OVSDB(app_manager.RyuApp):
             t = hub.spawn(self._start_remote, sock, client_address)
             self.threads.append(t)
 
+    def _bulk_read_handler(self, ev):
+        results = []
+
+        def done(gt, *args, **kwargs):
+            if gt in self.threads:
+                self.threads.remove(gt)
+
+            results.append(gt.wait())
+
+        threads = []
+        for c in self._clients.values():
+            gt = hub.spawn(c.read_request_handler, ev, bulk=True)
+            threads.append(gt)
+            self.threads.append(gt)
+            gt.link(done)
+
+        hub.joinall(threads)
+        rep = event.EventReadReply(None, results)
+        self.reply_to_request(ev, rep)
+
     def _proxy_event(self, ev):
         system_id = ev.system_id
         client_name = client.RemoteOvsdb.instance_name(system_id)
@@ -89,7 +126,22 @@ class OVSDB(app_manager.RyuApp):
         return self.send_event(client_name, ev)
 
     def _start_remote(self, sock, client_address):
-        app = client.RemoteOvsdb.factory(sock, client_address)
+        schema_tables = cfg.CONF.ovsdb.schema_tables
+        schema_ex_col = {}
+        if cfg.CONF.ovsdb.schema_exclude_columns:
+            for c in cfg.CONF.ovsdb.schema_exclude_columns:
+                tbl, col = c.split('.')
+                if tbl in schema_ex_col:
+                    schema_ex_col[tbl].append(col)
+                else:
+                    schema_ex_col[tbl] = [col]
+
+        app = client.RemoteOvsdb.factory(sock, client_address,
+                                         probe_interval=self._probe_interval,
+                                         min_backoff=self._min_backoff,
+                                         max_backoff=self._max_backoff,
+                                         schema_tables=schema_tables,
+                                         schema_exclude_columns=schema_ex_col)
 
         if app:
             self._clients[app.name] = app
@@ -137,8 +189,8 @@ class OVSDB(app_manager.RyuApp):
             self.main_thread = None
 
         # NOTE(jkoelker) Stop all the clients
-        for client in self._clients.values():
-            client.stop()
+        for c in self._clients.values():
+            c.stop()
 
         # NOTE(jkoelker) super will only take care of the event and joining now
         super(OVSDB, self).stop()
@@ -161,6 +213,16 @@ class OVSDB(app_manager.RyuApp):
     @handler.set_ev_cls(event.EventReadRequest)
     def read_request_handler(self, ev):
         system_id = ev.system_id
+
+        if system_id is None:
+            def done(gt, *args, **kwargs):
+                if gt in self.threads:
+                    self.threads.remove(gt)
+
+            thread = hub.spawn(self._bulk_read_handler, ev)
+            self.threads.append(thread)
+            return thread.link(done)
+
         client_name = client.RemoteOvsdb.instance_name(system_id)
         remote = self._clients.get(client_name)
 

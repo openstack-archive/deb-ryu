@@ -25,7 +25,9 @@
                               "mask": null, 
                               "value": "192.168.2.9"
                            }
-                        }
+                        },
+                        "len": 16,
+                        "type": 25
                      }
                   }, 
                   {
@@ -185,7 +187,6 @@
       "out_group": 4294967295, 
       "out_port": 4294967295, 
       "priority": 32768, 
-      "table_id": 2, 
-      "xid": 2
+      "table_id": 2
    }
 }

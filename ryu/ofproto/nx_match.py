@@ -16,16 +16,15 @@
 # limitations under the License.
 
 import struct
-import sys
 
 from ryu import exception
 from ryu.lib import mac
-from ryu.lib import type_desc
 from ryu.lib.pack_utils import msg_pack_into
+from ryu.ofproto import ether
 from ryu.ofproto import ofproto_parser
 from ryu.ofproto import ofproto_v1_0
 from ryu.ofproto import inet
-from ryu.ofproto import oxm_fields
+
 
 import logging
 LOG = logging.getLogger('ryu.ofproto.nx_match')
@@ -94,6 +93,7 @@ class Flow(ofproto_parser.StringifyMixin):
         self.regs = [0] * FLOW_N_REGS
         self.ipv6_label = 0
         self.pkt_mark = 0
+        self.tcp_flags = 0
 
 
 class FlowWildcards(ofproto_parser.StringifyMixin):
@@ -116,6 +116,7 @@ class FlowWildcards(ofproto_parser.StringifyMixin):
         self.regs_mask = [0] * FLOW_N_REGS
         self.wildcards = ofproto_v1_0.OFPFW_ALL
         self.pkt_mark_mask = 0
+        self.tcp_flags_mask = 0
 
 
 class ClsRule(ofproto_parser.StringifyMixin):
@@ -312,6 +313,10 @@ class ClsRule(ofproto_parser.StringifyMixin):
         self.flow.pkt_mark = pkt_mark
         self.wc.pkt_mark_mask = mask
 
+    def set_tcp_flags(self, tcp_flags, mask):
+        self.flow.tcp_flags = tcp_flags
+        self.wc.tcp_flags_mask = mask
+
     def flow_format(self):
         # Tunnel ID is only supported by NXM
         if self.wc.tun_id_mask != 0:
@@ -330,6 +335,9 @@ class ClsRule(ofproto_parser.StringifyMixin):
             return ofproto_v1_0.NXFF_NXM
 
         if self.wc.regs_bits > 0:
+            return ofproto_v1_0.NXFF_NXM
+
+        if self.flow.tcp_flags > 0:
             return ofproto_v1_0.NXFF_NXM
 
         return ofproto_v1_0.NXFF_OPENFLOW10
@@ -948,6 +956,19 @@ class MFPktMark(MFField):
                          rule.wc.pkt_mark_mask)
 
 
+@_register_make
+@_set_nxm_headers([ofproto_v1_0.NXM_NX_TCP_FLAGS,
+                   ofproto_v1_0.NXM_NX_TCP_FLAGS_W])
+class MFTcpFlags(MFField):
+    @classmethod
+    def make(cls, header):
+        return cls(header, MF_PACK_STRING_BE16)
+
+    def put(self, buf, offset, rule):
+        return self.putm(buf, offset, rule.flow.tcp_flags,
+                         rule.wc.tcp_flags_mask)
+
+
 def serialize_nxm_match(rule, buf, offset):
     old_offset = offset
 
@@ -1024,6 +1045,22 @@ def serialize_nxm_match(rule, buf, offset):
                 header = ofproto_v1_0.NXM_OF_UDP_DST
             else:
                 header = ofproto_v1_0.NXM_OF_UDP_DST_W
+        else:
+            header = 0
+        if header != 0:
+            offset += nxm_put(buf, offset, header, rule)
+
+    if rule.flow.tcp_flags != 0:
+        # TCP Flags can only be used if the ethernet type is IPv4 or IPv6
+        if rule.flow.dl_type in (ether.ETH_TYPE_IP, ether.ETH_TYPE_IPV6):
+            # TCP Flags can only be used if the ip protocol is TCP
+            if rule.flow.nw_proto == inet.IPPROTO_TCP:
+                if rule.wc.tcp_flags_mask == UINT16_MAX:
+                    header = ofproto_v1_0.NXM_NX_TCP_FLAGS
+                else:
+                    header = ofproto_v1_0.NXM_NX_TCP_FLAGS_W
+            else:
+                header = 0
         else:
             header = 0
         if header != 0:
@@ -1189,65 +1226,3 @@ class NXMatch(object):
         msg_pack_into(ofproto_v1_0.NXM_HEADER_PACK_STRING,
                       buf, offset, self.header)
         return struct.calcsize(ofproto_v1_0.NXM_HEADER_PACK_STRING)
-
-
-#
-# The followings are implementations for OpenFlow 1.2+
-#
-
-sys.modules[__name__].__doc__ = """
-The API of this class is the same as ``OFPMatch``.
-
-You can define the flow match by the keyword arguments.
-The following arguments are available.
-
-================ =============== ==================================
-Argument         Value           Description
-================ =============== ==================================
-eth_dst_nxm      MAC address     Ethernet destination address.
-eth_src_nxm      MAC address     Ethernet source address.
-tunnel_id_nxm    Integer 64bit   Tunnel identifier.
-tun_ipv4_src     IPv4 address    Tunnel IPv4 source address.
-tun_ipv4_dst     IPv4 address    Tunnel IPv4 destination address.
-pkt_mark         Integer 32bit   Packet metadata mark.
-conj_id          Integer 32bit   Conjunction ID used only with
-                                 the conjunction action
-ct_state         Integer 32bit   Conntrack state.
-ct_zone          Integer 16bit   Conntrack zone.
-ct_mark          Integer 32bit   Conntrack mark.
-ct_label         Integer 128bit  Conntrack label.
-_dp_hash         Integer 32bit   Flow hash computed in Datapath.
-reg<idx>         Integer 32bit   Packet register.
-                                 <idx> is register number 0-7.
-================ =============== ==================================
-"""
-
-oxm_types = [
-    oxm_fields.NiciraExtended0('eth_dst_nxm', 1, type_desc.MacAddr),
-    oxm_fields.NiciraExtended0('eth_src_nxm', 2, type_desc.MacAddr),
-    oxm_fields.NiciraExtended1('tunnel_id_nxm', 16, type_desc.Int8),
-    oxm_fields.NiciraExtended1('tun_ipv4_src', 31, type_desc.IPv4Addr),
-    oxm_fields.NiciraExtended1('tun_ipv4_dst', 32, type_desc.IPv4Addr),
-    oxm_fields.NiciraExtended1('pkt_mark', 33, type_desc.Int4),
-    oxm_fields.NiciraExtended1('conj_id', 37, type_desc.Int4),
-    oxm_fields.NiciraExtended1('ct_state', 105, type_desc.Int4),
-    oxm_fields.NiciraExtended1('ct_zone', 106, type_desc.Int2),
-    oxm_fields.NiciraExtended1('ct_mark', 107, type_desc.Int4),
-    oxm_fields.NiciraExtended1('ct_label', 108, type_desc.Int16),
-
-    # The following definition is merely for testing 64-bit experimenter OXMs.
-    # Following Open vSwitch, we use dp_hash for this purpose.
-    # Prefix the name with '_' to indicate this is not intended to be used
-    # in wild.
-    oxm_fields.NiciraExperimenter('_dp_hash', 0, type_desc.Int4),
-
-    # Support for matching/setting NX registers 0-7
-    oxm_fields.NiciraExtended1('reg0', 0, type_desc.Int4),
-    oxm_fields.NiciraExtended1('reg1', 1, type_desc.Int4),
-    oxm_fields.NiciraExtended1('reg2', 2, type_desc.Int4),
-    oxm_fields.NiciraExtended1('reg3', 3, type_desc.Int4),
-    oxm_fields.NiciraExtended1('reg4', 4, type_desc.Int4),
-    oxm_fields.NiciraExtended1('reg5', 5, type_desc.Int4),
-    oxm_fields.NiciraExtended1('reg6', 6, type_desc.Int4),
-    oxm_fields.NiciraExtended1('reg7', 7, type_desc.Int4),
-]

@@ -15,12 +15,17 @@
 """
   Defines some base class related to managing green threads.
 """
+from __future__ import absolute_import
+
 import abc
+from collections import OrderedDict
 import logging
+import six
 import socket
 import time
 import traceback
 import weakref
+
 import netaddr
 
 from ryu.lib import hub
@@ -37,12 +42,6 @@ from ryu.services.protocols.bgp.utils.evtlet import LoopingCall
 
 # Logger instance for this module.
 LOG = logging.getLogger('bgpspeaker.base')
-
-
-try:
-    from collections import OrderedDict
-except ImportError:
-    from ordereddict import OrderedDict
 
 # Pointer to active/available OrderedDict.
 OrderedDict = OrderedDict
@@ -127,6 +126,7 @@ class ActivityException(BGPSException):
     pass
 
 
+@six.add_metaclass(abc.ABCMeta)
 class Activity(object):
     """Base class for a thread of execution that provides some custom settings.
 
@@ -135,7 +135,6 @@ class Activity(object):
     to start another activity or greenthread. Activity is also holds pointers
     to sockets that it or its child activities of threads have create.
     """
-    __metaclass__ = abc.ABCMeta
 
     def __init__(self, name=None):
         self._name = name
@@ -367,7 +366,9 @@ class Activity(object):
                 sock.bind(sa)
                 sock.listen(50)
                 listen_sockets[sa] = sock
-            except socket.error:
+            except socket.error as e:
+                LOG.error('Error creating socket: %s', e)
+
                 if sock:
                     sock.close()
 
@@ -454,7 +455,7 @@ class Sink(object):
         self.index = Sink.next_index()
 
         # Event used to signal enqueing.
-        from utils.evtlet import EventletIOFactory
+        from .utils.evtlet import EventletIOFactory
         self.outgoing_msg_event = EventletIOFactory.create_custom_event()
 
         self.messages_queued = 0

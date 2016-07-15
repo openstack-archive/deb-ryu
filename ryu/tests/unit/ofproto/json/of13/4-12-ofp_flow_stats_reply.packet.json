@@ -139,7 +139,9 @@
                                        "mask": null, 
                                        "value": 258
                                     }
-                                 }
+                                 },
+                                 "len": 16,
+                                 "type": 25
                               }
                            }, 
                            {
@@ -247,9 +249,26 @@
                                  "port": 6, 
                                  "type": 0
                               }
+                           },
+                           {
+                              "OFPActionExperimenterUnknown": {
+                                 "len": 16,
+                                 "data": "ZXhwX2RhdGE=",
+                                 "experimenter": 98765432,
+                                 "type": 65535
+                              }
+                           },
+                           {
+                              "NXActionUnknown": {
+                                 "len": 16,
+                                 "data": "cF9kYXRh",
+                                 "experimenter": 8992,
+                                 "type": 65535,
+                                 "subtype": 25976
+                              }
                            }
                         ], 
-                        "len": 160, 
+                        "len": 192,
                         "type": 3
                      }
                   }, 
@@ -264,7 +283,9 @@
                                        "mask": null, 
                                        "value": "01:02:03:04:05:06"
                                     }
-                                 }
+                                 },
+                                 "len": 16,
+                                 "type": 25
                               }
                            }, 
                            {
@@ -275,7 +296,9 @@
                                        "mask": null, 
                                        "value": 1
                                     }
-                                 }
+                                 },
+                                 "len": 16,
+                                 "type": 25
                               }
                            }
                         ], 
@@ -300,7 +323,7 @@
                      }
                   }
                ], 
-               "length": 280, 
+               "length": 312,
                "match": {
                   "OFPMatch": {
                      "length": 4, 

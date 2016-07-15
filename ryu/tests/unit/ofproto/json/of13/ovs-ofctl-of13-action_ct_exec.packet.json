@@ -22,7 +22,9 @@
                                        "mask": null, 
                                        "value": 6636321
                                     }
-                                 }
+                                 },
+                                 "len": 16,
+                                 "type": 25
                               }
                            }
                         ], 
@@ -33,7 +35,8 @@
                         "recirc_table": 255, 
                         "subtype": 35, 
                         "type": 65535, 
-                        "zone_ofs_nbits": 0, 
+                        "zone_start": 0,
+                        "zone_end": 0,
                         "zone_src": 0
                      }
                   }
@@ -68,7 +71,6 @@
       "out_group": 4294967295, 
       "out_port": 4294967295, 
       "priority": 32768, 
-      "table_id": 3, 
-      "xid": 2
+      "table_id": 3
    }
 }

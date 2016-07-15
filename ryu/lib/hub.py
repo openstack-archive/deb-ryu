@@ -18,8 +18,8 @@ import logging
 import os
 
 
-# we don't bother to use cfg.py because monkey patch needs to be
-# called very early.  instead, we use an environment variable to
+# We don't bother to use cfg.py because monkey patch needs to be
+# called very early. Instead, we use an environment variable to
 # select the type of hub.
 HUB_TYPE = os.getenv('RYU_HUB_TYPE', 'eventlet')
 
@@ -45,34 +45,42 @@ if HUB_TYPE == 'eventlet':
     connect = eventlet.connect
 
     def spawn(*args, **kwargs):
+        raise_error = kwargs.pop('raise_error', False)
+
         def _launch(func, *args, **kwargs):
-            # mimic gevent's default raise_error=False behaviour
-            # by not propergating an exception to the joiner.
+            # Mimic gevent's default raise_error=False behaviour
+            # by not propagating an exception to the joiner.
             try:
-                func(*args, **kwargs)
-            except greenlet.GreenletExit:
+                return func(*args, **kwargs)
+            except TaskExit:
                 pass
             except:
-                # log uncaught exception.
-                # note: this is an intentional divergence from gevent
-                # behaviour.  gevent silently ignores such exceptions.
+                if raise_error:
+                    raise
+                # Log uncaught exception.
+                # Note: this is an intentional divergence from gevent
+                # behaviour; gevent silently ignores such exceptions.
                 LOG.error('hub: uncaught exception: %s',
                           traceback.format_exc())
 
         return eventlet.spawn(_launch, *args, **kwargs)
 
     def spawn_after(seconds, *args, **kwargs):
+        raise_error = kwargs.pop('raise_error', False)
+
         def _launch(func, *args, **kwargs):
-            # mimic gevent's default raise_error=False behaviour
-            # by not propergating an exception to the joiner.
+            # Mimic gevent's default raise_error=False behaviour
+            # by not propagating an exception to the joiner.
             try:
-                func(*args, **kwargs)
-            except greenlet.GreenletExit:
+                return func(*args, **kwargs)
+            except TaskExit:
                 pass
             except:
-                # log uncaught exception.
-                # note: this is an intentional divergence from gevent
-                # behaviour.  gevent silently ignores such exceptions.
+                if raise_error:
+                    raise
+                # Log uncaught exception.
+                # Note: this is an intentional divergence from gevent
+                # behaviour; gevent silently ignores such exceptions.
                 LOG.error('hub: uncaught exception: %s',
                           traceback.format_exc())
 
@@ -83,17 +91,18 @@ if HUB_TYPE == 'eventlet':
 
     def joinall(threads):
         for t in threads:
-            # this try-except is necessary when killing an inactive
-            # greenthread
+            # This try-except is necessary when killing an inactive
+            # greenthread.
             try:
                 t.wait()
-            except greenlet.GreenletExit:
+            except TaskExit:
                 pass
 
-    Queue = eventlet.queue.Queue
+    Queue = eventlet.queue.LightQueue
     QueueEmpty = eventlet.queue.Empty
     Semaphore = eventlet.semaphore.Semaphore
     BoundedSemaphore = eventlet.semaphore.BoundedSemaphore
+    TaskExit = greenlet.GreenletExit
 
     class StreamServer(object):
         def __init__(self, listen_info, handle=None, backlog=None,
@@ -144,9 +153,9 @@ if HUB_TYPE == 'eventlet':
 
         def _broadcast(self):
             self._ev.send()
-            # because eventlet Event doesn't allow mutiple send() on an event,
-            # re-create the underlying event.
-            # note: _ev.reset() is obsolete.
+            # Since eventlet Event doesn't allow multiple send() operations
+            # on an event, re-create the underlying event.
+            # Note: _ev.reset() is obsolete.
             self._ev = eventlet.event.Event()
 
         def is_set(self):
