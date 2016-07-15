@@ -19,6 +19,7 @@
 
 import abc
 import logging
+import six
 
 from ryu.lib.packet.bgp import BGP_ATTR_TYPE_ORIGIN
 from ryu.lib.packet.bgp import BGP_ATTR_TYPE_AS_PATH
@@ -44,12 +45,12 @@ from ryu.services.protocols.bgp.utils.stats import RESOURCE_NAME
 LOG = logging.getLogger('bgpspeaker.info_base.vrf')
 
 
+@six.add_metaclass(abc.ABCMeta)
 class VrfTable(Table):
     """Virtual Routing and Forwarding information base.
      Keeps destination imported to given vrf in represents.
      """
 
-    __metaclass__ = abc.ABCMeta
     ROUTE_FAMILY = None
     VPN_ROUTE_FAMILY = None
     NLRI_CLASS = None
@@ -104,8 +105,8 @@ class VrfTable(Table):
         local_route_count = 0
         for dest in self.values():
             for path in dest.known_path_list:
-                if (hasattr(path.source, 'version_num')
-                        or path.source == VPN_TABLE):
+                if (hasattr(path.source, 'version_num') or
+                        path.source == VPN_TABLE):
                     remote_route_count += 1
                 else:
                     local_route_count += 1
@@ -273,9 +274,9 @@ class VrfTable(Table):
         return super(VrfTable, self).clean_uninteresting_paths(interested_rts)
 
 
+@six.add_metaclass(abc.ABCMeta)
 class VrfDest(Destination):
     """Base class for VRF destination."""
-    __metaclass__ = abc.ABCMeta
 
     def __init__(self, table, nlri):
         super(VrfDest, self).__init__(table, nlri)
@@ -424,11 +425,11 @@ class VrfDest(Destination):
                              'with attribute label_list got %s' % path)
 
 
+@six.add_metaclass(abc.ABCMeta)
 class VrfPath(Path):
     """Represents a way of reaching an IP destination with a VPN.
     """
     __slots__ = ('_label_list', '_puid')
-    __metaclass__ = abc.ABCMeta
 
     ROUTE_FAMILY = None
     VPN_PATH_CLASS = None

@@ -18,6 +18,7 @@
 """
 from abc import ABCMeta
 from abc import abstractmethod
+import functools
 import numbers
 import logging
 import six
@@ -142,13 +143,13 @@ class ConfigValueError(RuntimeConfigError):
 # Configuration base classes.
 # =============================================================================
 
+@six.add_metaclass(ABCMeta)
 class BaseConf(object):
     """Base class for a set of configuration values.
 
     Configurations can be required or optional. Also acts as a container of
     configuration change listeners.
     """
-    __metaclass__ = ABCMeta
 
     def __init__(self, **kwargs):
         self._req_settings = self.get_req_settings()
@@ -425,9 +426,9 @@ class ConfWithStats(BaseConf):
                                   **kwargs)
 
 
+@six.add_metaclass(ABCMeta)
 class BaseConfListener(object):
     """Base class of all configuration listeners."""
-    __metaclass__ = ABCMeta
 
     def __init__(self, base_conf):
         pass
@@ -479,6 +480,7 @@ class ConfWithStatsListener(BaseConfListener):
         raise NotImplementedError()
 
 
+@functools.total_ordering
 class ConfEvent(object):
     """Encapsulates configuration settings change/update event."""
 
@@ -517,9 +519,13 @@ class ConfEvent(object):
         return ('ConfEvent(src=%s, name=%s, value=%s)' %
                 (self.src, self.name, self.value))
 
-    def __cmp__(self, other):
-        return cmp((other.src, other.name, other.value),
-                   (self.src, self.name, self.value))
+    def __lt__(self, other):
+        return ((self.src, self.name, self.value) <
+                (other.src, other.name, other.value))
+
+    def __eq__(self, other):
+        return ((self.src, self.name, self.value) ==
+                (other.src, other.name, other.value))
 
 
 # =============================================================================
@@ -598,10 +604,10 @@ def validate_cap_mbgp_ipv4(cmv4):
 
 
 @validate(name=CAP_MBGP_IPV6)
-def validate_cap_mbgp_ipv4(cmv6):
+def validate_cap_mbgp_ipv6(cmv6):
     if cmv6 not in (True, False):
         raise ConfigTypeError(desc='Invalid Enhanced Refresh capability '
-                              'settings: %s boolean value expected' % cmv4)
+                              'settings: %s boolean value expected' % cmv6)
 
     return cmv6
 

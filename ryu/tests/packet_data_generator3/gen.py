@@ -79,6 +79,14 @@ MESSAGES = [
                'cookie=0x123456789abcdef0/0xffffffffffffffff'] +
               STD_MATCH +
               ['actions=conjunction(0xabcdef,1/2)'])},
+    {'name': 'match_load_nx_register',
+     'versions': [4],
+     'cmd': 'mod-flows',
+     'args': ['table=3',
+              'cookie=0x123456789abcdef0/0xffffffffffffffff',
+              'reg0=0x1234',
+              'reg5=0xabcd/0xffff',
+              'actions=load:0xdeadbee->NXM_NX_REG0[4..31]']},
     {'name': 'match_move_nx_register',
      'versions': [4],
      'cmd': 'mod-flows',
@@ -122,6 +130,21 @@ MESSAGES = [
               'importance=39032'] +
               ['dl_type=0x86dd'] +
               ['actions=ct(commit,nat(dst=2001:1::1-2001:1::ffff)'])},
+    {'name': 'action_note',
+     'versions': [4],
+     'cmd': 'add-flow',
+     'args': (['priority=100'] +
+              ['actions=note:04.05.06.07.00.00'])},
+    {'name': 'action_controller',
+     'versions': [4],
+     'cmd': 'add-flow',
+     'args': (['priority=100'] +
+              ['actions=controller(reason=packet_out,max_len=1024,id=1)'])},
+    {'name': 'action_fintimeout',
+     'versions': [4],
+     'cmd': 'add-flow',
+     'args': (['priority=100,tcp'] +
+              ['actions=fin_timeout(idle_timeout=30,hard_timeout=60)'])},
 ]
 
 buf = []
@@ -154,7 +177,8 @@ class MyHandler(socketserver.BaseRequestHandler):
                 hello.serialize()
                 self.request.send(hello.buf)
             elif msg_type == desc.ofproto.OFPT_FLOW_MOD:
-                buf.append(data[:msg_len])
+                # HACK: Clear xid into zero
+                buf.append(data[:4] + b'\x00\x00\x00\x00' + data[8:msg_len])
             elif msg_type == desc.ofproto.OFPT_BARRIER_REQUEST:
                 brep = desc.ofproto_parser.OFPBarrierReply(desc)
                 brep.xid = xid

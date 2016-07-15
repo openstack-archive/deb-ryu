@@ -2814,7 +2814,6 @@ class OFPGroupDescStats(StringifyMixin):
         self.length = length
         self.type = type_
         self.group_id = group_id
-        self.bucket_array_len = bucket_array_len
         self.buckets = buckets
         self.properties = properties
 
@@ -3223,11 +3222,11 @@ class OFPMeterDescStats(StringifyMixin):
 
         (meter_config.length, meter_config.flags,
          meter_config.meter_id) = struct.unpack_from(
-            ofproto.OFP_METER_CONFIG_PACK_STR, buf, offset)
-        offset += ofproto.OFP_METER_CONFIG_SIZE
+            ofproto.OFP_METER_DESC_PACK_STR, buf, offset)
+        offset += ofproto.OFP_METER_DESC_SIZE
 
         meter_config.bands = []
-        length = ofproto.OFP_METER_CONFIG_SIZE
+        length = ofproto.OFP_METER_DESC_SIZE
         while length < meter_config.length:
             band = OFPMeterBandHeader.parser(buf, offset)
             meter_config.bands.append(band)
@@ -3309,7 +3308,7 @@ class OFPMeterDescStatsReply(OFPMultipartReply):
 
 class OFPMeterFeaturesStats(ofproto_parser.namedtuple('OFPMeterFeaturesStats',
                             ('max_meter', 'band_types', 'capabilities',
-                             'max_bands', 'max_color'))):
+                             'max_bands', 'max_color', 'features'))):
     @classmethod
     def parser(cls, buf, offset):
         meter_features = struct.unpack_from(
@@ -5067,6 +5066,7 @@ class OFPPacketOut(MsgBase):
                       self.buffer_id, self.actions_len)
 
 
+@_register_parser
 @_set_msg_type(ofproto.OFPT_FLOW_MOD)
 class OFPFlowMod(MsgBase):
     """
@@ -5182,6 +5182,31 @@ class OFPFlowMod(MsgBase):
         for inst in self.instructions:
             inst.serialize(self.buf, offset)
             offset += inst.len
+
+    @classmethod
+    def parser(cls, datapath, version, msg_type, msg_len, xid, buf):
+        msg = super(OFPFlowMod, cls).parser(
+            datapath, version, msg_type, msg_len, xid, buf)
+
+        (msg.cookie, msg.cookie_mask, msg.table_id,
+         msg.command, msg.idle_timeout, msg.hard_timeout,
+         msg.priority, msg.buffer_id, msg.out_port,
+         msg.out_group, msg.flags, msg.importance) = struct.unpack_from(
+            ofproto.OFP_FLOW_MOD_PACK_STR0, msg.buf,
+            ofproto.OFP_HEADER_SIZE)
+        offset = ofproto.OFP_FLOW_MOD_SIZE - ofproto.OFP_HEADER_SIZE
+
+        msg.match = OFPMatch.parser(buf, offset)
+        offset += utils.round_up(msg.match.length, 8)
+
+        instructions = []
+        while offset < msg_len:
+            i = OFPInstruction.parser(buf, offset)
+            instructions.append(i)
+            offset += i.len
+        msg.instructions = instructions
+
+        return msg
 
 
 class OFPInstruction(StringifyMixin):
@@ -5781,7 +5806,9 @@ class OFPActionSetField(OFPAction):
     def to_jsondict(self):
         return {
             self.__class__.__name__: {
-                'field': ofproto.oxm_to_jsondict(self.key, self.value)
+                'field': ofproto.oxm_to_jsondict(self.key, self.value),
+                "len": self.len,
+                "type": self.type
             }
         }
 
@@ -5887,12 +5914,14 @@ class OFPActionCopyField(OFPAction):
         return cls(n_bits, src_offset, dst_offset, oxm_ids, type_, len_)
 
     def serialize(self, buf, offset):
+        oxm_ids_buf = bytearray()
+        for i in self.oxm_ids:
+            oxm_ids_buf += i.serialize()
+        self.len += len(oxm_ids_buf)
         msg_pack_into(ofproto.OFP_ACTION_COPY_FIELD_PACK_STR, buf,
                       offset, self.type, self.len,
                       self.n_bits, self.src_offset, self.dst_offset)
-
-        for i in self.oxm_ids:
-            buf += i.serialize()
+        buf += oxm_ids_buf
 
 
 @OFPAction.register_action_type(ofproto.OFPAT_METER,
@@ -6580,13 +6609,11 @@ class OFPSetAsync(MsgBase):
             ofp = datapath.ofproto
             ofp_parser = datapath.ofproto_parser
 
-            properties = [ofp_parser.OFPAsyncConfigPropReasons(
-                          8, ofp_parser.OFPACPT_PACKET_IN_SLAVE,
-                          (ofp_parser.OFPR_APPLY_ACTION |
-                           ofp_parser.OFPR_INVALID_TTL)),
-                          ofp_parser.OFPAsyncConfigPropExperimenter(
-                          ofp.OFPTFPT_EXPERIMENTER_MASTER,
-                          16, 100, 2, bytearray())]
+            properties = [
+                ofp_parser.OFPAsyncConfigPropReasons(
+                    ofp.OFPACPT_PACKET_IN_SLAVE, 8,
+                    (1 << ofp.OFPR_APPLY_ACTION
+                     | 1 << ofp.OFPR_INVALID_TTL))]
             req = ofp_parser.OFPSetAsync(datapath, properties)
             datapath.send_msg(req)
     """

@@ -19,7 +19,7 @@ OpenFlow 1.4 definitions.
 """
 
 from ryu.lib import type_desc
-from ryu.ofproto import nx_match
+from ryu.ofproto import nicira_ext
 from ryu.ofproto import ofproto_utils
 from ryu.ofproto import oxm_fields
 
@@ -396,7 +396,7 @@ oxm_types = [
     # EXT-233 Output match Extension
     # NOTE(yamamoto): The spec says uint64_t but I assume it's an error.
     oxm_fields.ONFExperimenter('actset_output', 43, type_desc.Int4),
-] + nx_match.oxm_types
+] + nicira_ext.oxm_types
 
 oxm_fields.generate(__name__)
 
@@ -1406,8 +1406,15 @@ OFPACPT_TABLE_STATUS_SLAVE = 8          # Table status mask for slave.
 OFPACPT_TABLE_STATUS_MASTER = 9         # Table status mask for master.
 OFPACPT_REQUESTFORWARD_SLAVE = 10       # RequestForward mask for slave.
 OFPACPT_REQUESTFORWARD_MASTER = 11      # RequestForward mask for master.
-OFPTFPT_EXPERIMENTER_SLAVE = 0xFFFE     # Experimenter for slave.
-OFPTFPT_EXPERIMENTER_MASTER = 0xFFFF    # Experimenter for master.
+OFPTFPT_EXPERIMENTER_SLAVE = 0xFFFE     # Experimenter for slave (depracated).
+OFPTFPT_EXPERIMENTER_MASTER = 0xFFFF    # Experimenter for master (depracated).
+                                        # New or updated Ryu applications shall use
+                                        # OFPACPT_EXPERIMENTER_SLAVE and OFPACPT_EXPERIMENTER_MASTER.
+                                        # The variable name is a typo of in specifications before v1.5.0.
+OFPACPT_EXPERIMENTER_SLAVE = 0xFFFE     # Experimenter for slave.
+OFPACPT_EXPERIMENTER_MASTER = 0xFFFF    # Experimenter for master.
+                                        # Backporting from ofproto_v1_5 for consistency with
+                                        # later OF specs.
 
 # struct ofp_async_config_prop_reasons
 OFP_ASYNC_CONFIG_PROP_REASONS_PACK_STR = '!HHI'

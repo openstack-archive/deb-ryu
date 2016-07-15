@@ -22,7 +22,6 @@ import time
 import traceback
 
 from ryu.services.protocols.bgp.base import Activity
-from ryu.services.protocols.bgp.base import OrderedDict
 from ryu.services.protocols.bgp.base import Sink
 from ryu.services.protocols.bgp.base import Source
 from ryu.services.protocols.bgp.base import SUPPORTED_GLOBAL_RF
@@ -49,7 +48,6 @@ from ryu.lib.packet import bgp
 
 from ryu.lib.packet.bgp import RouteFamily
 from ryu.lib.packet.bgp import RF_IPv4_UC
-from ryu.lib.packet.bgp import RF_IPv6_UC
 from ryu.lib.packet.bgp import RF_IPv4_VPN
 from ryu.lib.packet.bgp import RF_IPv6_VPN
 from ryu.lib.packet.bgp import RF_RTC_UC
@@ -392,6 +390,10 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
         return self._neigh_conf.multi_exit_disc
 
     @property
+    def local_as(self):
+        return self._neigh_conf.local_as
+
+    @property
     def in_filters(self):
         return self._in_filters
 
@@ -698,7 +700,8 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
             # Collect update statistics.
             self.state.incr(PeerCounterNames.SENT_UPDATES)
         else:
-            LOG.debug('prefix : %s is not sent by filter : %s', path.nlri, blocked_cause)
+            LOG.debug('prefix : %s is not sent by filter : %s',
+                      path.nlri, blocked_cause)
 
         # We have to create sent_route for every OutgoingRoute which is
         # not a withdraw or was for route-refresh msg.
@@ -919,9 +922,9 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
                 if (len(path_seg_list) > 0 and
                         isinstance(path_seg_list[0], list) and
                         len(path_seg_list[0]) < 255):
-                    path_seg_list[0].insert(0, self._core_service.asn)
+                    path_seg_list[0].insert(0, self.local_as)
                 else:
-                    path_seg_list.insert(0, [self._core_service.asn])
+                    path_seg_list.insert(0, [self.local_as])
                 aspath_attr = BGPPathAttributeAsPath(path_seg_list)
 
             # MULTI_EXIT_DISC Attribute.
@@ -1035,7 +1038,7 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
         if self._neigh_conf.enabled:
             self._connect_retry_event.set()
 
-        while 1:
+        while True:
             self._connect_retry_event.wait()
 
             # Reconnecting immediately after closing connection may be not very
@@ -1065,11 +1068,11 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
                 tcp_conn_timeout = self._common_conf.tcp_conn_timeout
                 try:
                     password = self._neigh_conf.password
-                    sock = self._connect_tcp(peer_address,
-                                             client_factory,
-                                             time_out=tcp_conn_timeout,
-                                             bind_address=bind_addr,
-                                             password=password)
+                    self._connect_tcp(peer_address,
+                                      client_factory,
+                                      time_out=tcp_conn_timeout,
+                                      bind_address=bind_addr,
+                                      password=password)
                 except socket.error:
                     self.state.bgp_state = const.BGP_FSM_ACTIVE
                     if LOG.isEnabledFor(logging.DEBUG):
@@ -1187,7 +1190,7 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
 
         Current setting include capabilities, timers and ids.
         """
-        asnum = self._common_conf.local_as
+        asnum = self.local_as
         bgpid = self._common_conf.router_id
         holdtime = self._neigh_conf.hold_time
 
@@ -1370,7 +1373,7 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
 
         aspath = umsg_pattrs.get(BGP_ATTR_TYPE_AS_PATH)
         # Check if AS_PATH has loops.
-        if aspath.has_local_as(self._common_conf.local_as):
+        if aspath.has_local_as(self.local_as):
             LOG.error('Update message AS_PATH has loops. Ignoring this'
                       ' UPDATE. %s', update_msg)
             return
@@ -1405,7 +1408,8 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
                 tm = self._core_service.table_manager
                 tm.learn_path(new_path)
             else:
-                LOG.debug('prefix : %s is blocked by in-bound filter: %s', msg_nlri, blocked_cause)
+                LOG.debug('prefix : %s is blocked by in-bound filter: %s',
+                          msg_nlri, blocked_cause)
 
         # If update message had any qualifying new paths, do some book-keeping.
         if msg_nlri_list:
@@ -1467,7 +1471,8 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
                 tm = self._core_service.table_manager
                 tm.learn_path(w_path)
             else:
-                LOG.debug('prefix : %s is blocked by in-bound filter: %s', nlri_str, blocked_cause)
+                LOG.debug('prefix : %s is blocked by in-bound filter: %s',
+                          nlri_str, blocked_cause)
 
     def _extract_and_handle_mpbgp_new_paths(self, update_msg):
         """Extracts new paths advertised in the given update message's
@@ -1496,7 +1501,7 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
 
         aspath = umsg_pattrs.get(BGP_ATTR_TYPE_AS_PATH)
         # Check if AS_PATH has loops.
-        if aspath.has_local_as(self._common_conf.local_as):
+        if aspath.has_local_as(self.local_as):
             LOG.error('Update message AS_PATH has loops. Ignoring this'
                       ' UPDATE. %s', update_msg)
             return
@@ -1562,7 +1567,8 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
                     tm = self._core_service.table_manager
                     tm.learn_path(new_path)
             else:
-                LOG.debug('prefix : %s is blocked by in-bound filter: %s', msg_nlri, blocked_cause)
+                LOG.debug('prefix : %s is blocked by in-bound filter: %s',
+                          msg_nlri, blocked_cause)
 
         # If update message had any qualifying new paths, do some book-keeping.
         if msg_nlri_list:
@@ -1623,7 +1629,8 @@ class Peer(Source, Sink, NeighborConfListener, Activity):
                 tm = self._core_service.table_manager
                 tm.learn_path(w_path)
             else:
-                LOG.debug('prefix : %s is blocked by in-bound filter: %s', w_nlri, blocked_cause)
+                LOG.debug('prefix : %s is blocked by in-bound filter: %s',
+                          w_nlri, blocked_cause)
 
     def _handle_eor(self, route_family):
         """Currently we only handle EOR for RTC address-family.

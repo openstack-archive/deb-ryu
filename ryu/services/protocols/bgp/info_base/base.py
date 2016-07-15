@@ -23,7 +23,9 @@ from abc import ABCMeta
 from abc import abstractmethod
 from copy import copy
 import logging
+import functools
 import netaddr
+import six
 
 from ryu.lib.packet.bgp import RF_IPv4_UC
 from ryu.lib.packet.bgp import RouteTargetMembershipNLRI
@@ -42,6 +44,7 @@ from ryu.services.protocols.bgp.processor import BPR_UNKNOWN
 LOG = logging.getLogger('bgpspeaker.info_base.base')
 
 
+@six.add_metaclass(ABCMeta)
 class Table(object):
     """A container for holding information about destination/prefixes.
 
@@ -49,7 +52,6 @@ class Table(object):
     This is a base class which should be sub-classed for different route
     family. A table can be uniquely identified by (Route Family, Scope Id).
     """
-    __metaclass__ = abc.ABCMeta
     ROUTE_FAMILY = RF_IPv4_UC
 
     def __init__(self, scope_id, core_service, signal_bus):
@@ -81,9 +83,6 @@ class Table(object):
         raise NotImplementedError()
 
     def values(self):
-        return self._destinations.values()
-
-    def itervalues(self):
         return iter(self._destinations.values())
 
     def insert(self, path):
@@ -225,6 +224,10 @@ class NonVrfPathProcessingMixin(object):
     because they are processed at VRF level, so different logic applies.
     """
 
+    def __init__(self):
+        self._core_service = None  # not assigned yet
+        self._known_path_list = []
+
     def _best_path_lost(self):
         self._best_path = None
 
@@ -249,8 +252,9 @@ class NonVrfPathProcessingMixin(object):
         LOG.debug('New best path selected for destination %s', self)
 
         # If old best path was withdrawn
-        if (old_best_path and old_best_path not in self._known_path_list
-                and self._sent_routes):
+        if (old_best_path and
+                old_best_path not in self._known_path_list and
+                self._sent_routes):
             # Have to clear sent_route list for this destination as
             # best path is removed.
             self._sent_routes = {}
@@ -272,6 +276,7 @@ class NonVrfPathProcessingMixin(object):
                 self._sent_routes = {}
 
 
+@six.add_metaclass(ABCMeta)
 class Destination(object):
     """State about a particular destination.
 
@@ -279,7 +284,6 @@ class Destination(object):
     a routing information base table *Table*.
     """
 
-    __metaclass__ = abc.ABCMeta
     ROUTE_FAMILY = RF_IPv4_UC
 
     def __init__(self, table, nlri):
@@ -662,13 +666,13 @@ class Destination(object):
         return result
 
 
+@six.add_metaclass(ABCMeta)
 class Path(object):
     """Represents a way of reaching an IP destination.
 
     Also contains other meta-data given to us by a specific source (such as a
     peer).
     """
-    __metaclass__ = ABCMeta
     __slots__ = ('_source', '_path_attr_map', '_nlri', '_source_version_num',
                  '_exported_from', '_nexthop', 'next_path', 'prev_path',
                  '_is_withdraw', 'med_set_by_target_neighbor')
@@ -810,7 +814,7 @@ class Path(object):
         return not interested_rts.isdisjoint(curr_rts)
 
     def is_local(self):
-        return self._source == None
+        return self._source is None
 
     def has_nexthop(self):
         return not (not self._nexthop or self._nexthop == '0.0.0.0' or
@@ -832,6 +836,7 @@ class Path(object):
             self._path_attr_map, self._nexthop, self._is_withdraw))
 
 
+@six.add_metaclass(ABCMeta)
 class Filter(object):
     """Represents a general filter for in-bound and out-bound filter
 
@@ -842,7 +847,6 @@ class Filter(object):
     ================ ==================================================
 
     """
-    __metaclass__ = ABCMeta
 
     ROUTE_FAMILY = RF_IPv4_UC
 
@@ -880,6 +884,7 @@ class Filter(object):
         raise NotImplementedError()
 
 
+@functools.total_ordering
 class PrefixFilter(Filter):
     """
     used to specify a prefix for filter.
@@ -934,8 +939,11 @@ class PrefixFilter(Filter):
         self._ge = ge
         self._le = le
 
-    def __cmp__(self, other):
-        return cmp(self.prefix, other.prefix)
+    def __lt__(self, other):
+        return self._network < other._network
+
+    def __eq__(self, other):
+        return self._network == other._network
 
     def __repr__(self):
         policy = 'PERMIT' \
@@ -1009,6 +1017,7 @@ class PrefixFilter(Filter):
                               le=self._le)
 
 
+@functools.total_ordering
 class ASPathFilter(Filter):
     """
     used to specify a prefix for AS_PATH attribute.
@@ -1055,8 +1064,11 @@ class ASPathFilter(Filter):
         super(ASPathFilter, self).__init__(policy)
         self._as_number = as_number
 
-    def __cmp__(self, other):
-        return cmp(self.as_number, other.as_number)
+    def __lt__(self, other):
+        return self.as_number < other.as_number
+
+    def __eq__(self, other):
+        return self.as_number == other.as_number
 
     def __repr__(self):
         policy = 'TOP'
@@ -1223,5 +1235,8 @@ class AttributeMap(object):
             if self.attr_type == self.ATTR_LOCAL_PREF else None
 
         filter_string = ','.join(repr(f) for f in self.filters)
-        return 'AttributeMap(filters=[%s],attribute_type=%s,attribute_value=%s)'\
-               % (filter_string, attr_type, self.attr_value)
+        return ('AttributeMap(filters=[%s],'
+                'attribute_type=%s,'
+                'attribute_value=%s)' % (filter_string,
+                                         attr_type,
+                                         self.attr_value))
