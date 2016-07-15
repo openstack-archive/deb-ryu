@@ -1,3 +1,9 @@
+ryu (4.4+dfsg1-1) experimental; urgency=medium
+
+  * New upstream release.
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 15 Jul 2016 16:13:52 +0200
+
 ryu (3.30+dfsg1-3) unstable; urgency=medium
 
   [ Ondřej Nový ]
