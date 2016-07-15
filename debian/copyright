@@ -22,10 +22,6 @@ Files: ryu/contrib/tinyrpc/*
 Copyright: 2013 Marc Brinkmann
 License: MIT
 
-Files: ryu/contrib/ovs/*
-Copyright: 2009-2013 Nicira, Inc.
-License: Apache-2.0
-
 Files: tools/with_venv.sh
 Copyright: 2011 OpenStack LLC
 License: Apache-2.0
@@ -41,7 +37,6 @@ Files: tools/normalize_json.py
 Copyright: 2013-2014 Nippon Telegraph and Telephone Corporation
            2013-2014 YAMAMOTO Takashi <yamamoto@valinux.co.jp>
 License: Apache-2.0
-
 
 Files: ryu/cmd/rpc_cli.py ryu/cmd/of_config_cli.py ryu/cmd/ryu_base.py
 Copyright: 2013-2014 Nippon Telegraph and Telephone Corporation

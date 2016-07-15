@@ -1,6 +1,7 @@
 ryu (4.4+dfsg1-1) experimental; urgency=medium
 
   * New upstream release.
+  * Remove ryu/contrib/ovs from debian/copyright (folder is gone).
 
  -- Thomas Goirand <zigo@debian.org>  Fri, 15 Jul 2016 16:13:52 +0200
 
