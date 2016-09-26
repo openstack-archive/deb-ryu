@@ -27,8 +27,8 @@ Build-Depends-Indep: python-eventlet,
                      python-sphinx-rtd-theme,
                      python-webob,
 Standards-Version: 3.9.8
-Vcs-Browser: https://anonscm.debian.org/gitweb/?p=openstack/ryu.git
-Vcs-Git: https://anonscm.debian.org/git/openstack/ryu.git
+Vcs-Browser: https://git.openstack.org/cgit/openstack/deb-ryu?h=debian%2Fnewton
+Vcs-Git: https://git.openstack.org/openstack/deb-ryu -b debian/newton
 Homepage: http://osrg.github.io/ryu/
 
 Package: python-ryu
