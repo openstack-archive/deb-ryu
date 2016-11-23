@@ -2,6 +2,8 @@ ryu (4.4+dfsg1-2) UNRELEASED; urgency=medium
 
   * d/s/options: extend-diff-ignore of .gitreview
   * d/control: Using OpenStack's Gerrit as VCS URLs.
+  * Bumped debhelper compat version to 10
+  * Added lsb-base to depends
 
  -- Ondřej Nový <onovy@debian.org>  Mon, 26 Sep 2016 19:17:58 +0200
 
